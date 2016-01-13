@@ -28,6 +28,7 @@
             this.labelStatus = new System.Windows.Forms.ToolStripStatusLabel();
             this.buttonStatus = new System.Windows.Forms.ToolStripDropDownButton();
             this.buttonInfo = new System.Windows.Forms.ToolStripDropDownButton();
+            this.comboBoxNetwork = new System.Windows.Forms.ToolStripComboBox();
             this.menuStrip.SuspendLayout();
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
@@ -63,6 +64,7 @@
             // 
             this.networkToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.localToolStripMenuItem,
+            this.comboBoxNetwork,
             this.toolStripMenuItem1,
             this.connectToolStripMenuItem,
             this.disconnectToolStripMenuItem});
@@ -119,7 +121,7 @@
             // labelStatus
             // 
             this.labelStatus.Name = "labelStatus";
-            this.labelStatus.Size = new System.Drawing.Size(1157, 23);
+            this.labelStatus.Size = new System.Drawing.Size(1203, 17);
             this.labelStatus.Spring = true;
             this.labelStatus.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
@@ -131,7 +133,7 @@
             this.buttonStatus.ImageTransparentColor = System.Drawing.Color.Magenta;
             this.buttonStatus.Name = "buttonStatus";
             this.buttonStatus.ShowDropDownArrow = false;
-            this.buttonStatus.Size = new System.Drawing.Size(20, 26);
+            this.buttonStatus.Size = new System.Drawing.Size(20, 20);
             this.buttonStatus.Text = "toolStripDropDownButton1";
             this.buttonStatus.ToolTipText = "Connected to 0 Nodes";
             this.buttonStatus.Click += new System.EventHandler(this.buttonStatus_Click);
@@ -144,9 +146,18 @@
             this.buttonInfo.ImageTransparentColor = System.Drawing.Color.Magenta;
             this.buttonInfo.Name = "buttonInfo";
             this.buttonInfo.ShowDropDownArrow = false;
-            this.buttonInfo.Size = new System.Drawing.Size(20, 26);
+            this.buttonInfo.Size = new System.Drawing.Size(20, 20);
             this.buttonInfo.Text = "toolStripDropDownButton2";
             this.buttonInfo.ToolTipText = "No Blockchain Info.";
+            // 
+            // comboBoxNetwork
+            // 
+            this.comboBoxNetwork.Items.AddRange(new object[] {
+            "TestNet",
+            "Main"});
+            this.comboBoxNetwork.Name = "comboBoxNetwork";
+            this.comboBoxNetwork.Size = new System.Drawing.Size(121, 33);
+            this.comboBoxNetwork.SelectedIndexChanged += new System.EventHandler(this.comboBoxNetwork_SelectedIndexChanged);
             // 
             // FormMain
             // 
@@ -184,6 +195,7 @@
         private System.Windows.Forms.ToolStripSeparator toolStripMenuItem1;
         private System.Windows.Forms.ToolStripMenuItem connectToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem disconnectToolStripMenuItem;
+        private System.Windows.Forms.ToolStripComboBox comboBoxNetwork;
     }
 }
 

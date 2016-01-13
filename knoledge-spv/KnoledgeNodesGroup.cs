@@ -27,6 +27,8 @@ namespace knoledge_spv
                 {
                     foreach (Node node in ConnectedNodes)
                     {
+                        if (_cts.IsCancellationRequested) return;
+
                         if (!_nodes.Contains(node))
                         {
                             _nodes.Add(node);
@@ -59,6 +61,18 @@ namespace knoledge_spv
                 return _nodes.FirstOrDefault(n => n.State == NodeState.Connected ||
                                                     n.State == NodeState.HandShaked);
             }
+        }
+
+        public void Disconnect(string reason = "")
+        {
+            _cts.Cancel(false);
+
+            // do this ourselves so a reason can be passed to the node
+            foreach (var node in ConnectedNodes)
+                node.DisconnectAsync(reason);
+
+            // call the base class just in case we missed something
+            base.Disconnect();
         }
 
         private void AddHandlers(Node node)
