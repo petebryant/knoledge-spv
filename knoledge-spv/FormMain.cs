@@ -34,6 +34,7 @@ namespace knoledge_spv
         System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer();
         int _selectedNetwork = 0;
         bool _initialised = false;
+        KnoledgeWallet _wallet;
 
         public FormMain()
         {
@@ -65,17 +66,17 @@ namespace knoledge_spv
 
         private string AddrmanFile
         {
-            get { return Path.Combine(AppDir, "addrman.dat"); }
-        }
-
-        private string TrackerFile
-        {
-            get {return Path.Combine(AppDir, "tracker.dat");}
+            get { return Path.Combine(AppDir, string.Format("addrman{0}.dat", _selectedNetwork)); }
         }
 
         private string ChainFile
         {
-            get { return Path.Combine(AppDir, "chain.dat"); }
+            get { return Path.Combine(AppDir, string.Format("chain{0}.dat", _selectedNetwork)); }
+        }
+
+        private string TrackerFile
+        {
+            get {return Path.Combine(AppDir, string.Format("tracker{0}.dat", _selectedNetwork));}
         }
 
         private void CheckLocalToolStripMenu(bool check)
@@ -239,7 +240,7 @@ namespace knoledge_spv
             int localHeight = 0;
             bool outOfDate = true;
 
-            if (_localChain != null)
+            if (_localChain != null && _localChain.Tip != null)
             {
                 DateTimeOffset date = _localChain.Tip.Header.BlockTime.ToLocalTime();
                 DateTimeOffset now = DateTimeOffset.Now;
@@ -354,12 +355,20 @@ namespace knoledge_spv
             _cts = new CancellationTokenSource();
             StartConnection();
             UpdateUI();
+
+            _wallet = new KnoledgeWallet(Network);
         }
 
         private Tracker GetTracker()
         {
             if (_connectionParameters != null)
-                return _connectionParameters.TemplateBehaviors.Find<TrackerBehavior>().Tracker;
+            {
+                TrackerBehavior behaviour = _connectionParameters.TemplateBehaviors.Find<TrackerBehavior>();
+
+                if (behaviour != null)
+                    return behaviour.Tracker;
+
+            }
 
             try
             {
@@ -374,6 +383,7 @@ namespace knoledge_spv
             catch
             {
             }
+
             return new Tracker();
         }
 
@@ -579,6 +589,16 @@ namespace knoledge_spv
                             addr.SavePeerFile(AddrmanFile, Network);
 
                         SaveChainToDisk();
+
+                        using (var fs = File.Open(TrackerFile, FileMode.Create))
+                        {
+                            Tracker tracker = GetTracker();
+                            
+                            if (tracker != null)
+                                tracker.Save(fs);
+                        }
+
+                        _wallet.Save();
                     }
                     catch { }
                     finally
