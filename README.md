@@ -1,5 +1,5 @@
 # knoledge-spv
 
-A C# Bitcoin SPV client built using NBitcoin
+A C# Bitcoin SPV client built using NBitcoin and based on the NBitcoin SPV Sample.
 
-Includes an example of sending unspent received coins. 
+Extends the example to create and send transactions using unspent coins received by the Wallet.
