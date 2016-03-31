@@ -12,33 +12,25 @@ namespace knoledge_spv
     public class KnoledgeNodesGroup : NodesGroup, IDisposable
     {
         bool _disposed = false;
-        CancellationTokenSource _cts = new CancellationTokenSource();
         NodesCollection _nodes = new NodesCollection();
 
         public KnoledgeNodesGroup(
             Network network,
             NodeConnectionParameters connectionParameters = null,
             NodeRequirement requirements = null)
-            : base(network, connectionParameters, requirements)
-        {
-            Task t = Task.Factory.StartNew(() =>
-            {
-                while (!_cts.IsCancellationRequested)
-                {
-                    foreach (Node node in ConnectedNodes)
-                    {
-                        if (_cts.IsCancellationRequested) return;
+            : base(network, connectionParameters, requirements) { }
 
-                        if (!_nodes.Contains(node))
-                        {
-                            _nodes.Add(node);
-                            AddHandlers(node);
-                            StateChanged(node, NodeState.Offline);
-                        }
-                    }
-                    Thread.Sleep(50);
+        public void Update()
+        {
+            foreach (Node node in ConnectedNodes)
+            {
+                if (!_nodes.Contains(node))
+                {
+                    _nodes.Add(node);
+                    AddHandlers(node);
+                    StateChanged(node, NodeState.Offline);
                 }
-            }, _cts.Token);
+            }
         }
 
         public NodeStateEventHandler StateChanged { get; set; }
@@ -65,8 +57,6 @@ namespace knoledge_spv
 
         public void Disconnect(string reason = "")
         {
-            _cts.Cancel(false);
-
             // do this ourselves so a reason can be passed to the node
             foreach (var node in ConnectedNodes)
                 node.DisconnectAsync(reason);
@@ -128,7 +118,6 @@ namespace knoledge_spv
 
             if (disposing)
             {
-                _cts.Cancel();
                 foreach (Node node in _nodes)
                 {
                     RemoveHandlers(node);

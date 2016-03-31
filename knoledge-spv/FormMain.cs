@@ -3,11 +3,13 @@ using NBitcoin.Protocol;
 using NBitcoin.Protocol.Behaviors;
 using NBitcoin.SPV;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -16,83 +18,66 @@ namespace knoledge_spv
 {
     public partial class FormMain : Form
     {
+        bool _isSaving = false;
         bool _isClosing = false;
-        bool _connecting = false;
         bool _disposed = false;
-        bool _gettingChain = false;
-        bool _saving = false;
         bool _updatingUI = false;
         object _padlock = new object();
-        KnoledgeNodesGroup _group;
-        Node _node;
+        long _transactions = 0;
+        NodesGroup _group;
         NodeConnectionParameters _connectionParameters;
-        ConcurrentChain _chain;
-        ConcurrentChain _localChain;
-        CancellationTokenSource _cts = new CancellationTokenSource();
-        IPAddress _localIPAddress = null;
-        IPAddress _oldIPAddress = null;
-        System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer();
-        int _selectedNetwork = 0;
-        bool _initialised = false;
         KnoledgeWallet _wallet;
+        IList<KnoledgeWallet> _wallets = new List<KnoledgeWallet>();
 
         public FormMain()
         {
             InitializeComponent();
-            comboBoxNetwork.SelectedIndex = _selectedNetwork;
-            _initialised = true;
+
+            LoadWallets();
+        }
+
+        private void LoadWallets()
+        {
+            foreach (var wallet in Common.LoadWallets(Network))
+            {
+                _wallets.Add(wallet);
+                wallet.Update();
+            }
+
+            _wallet = _wallets.FirstOrDefault();
+            UpdateWalletComboBox();
+        }
+
+        private void UpdateWalletComboBox()
+        {
+            if (comboBoxWallet.Items.Count > 0) comboBoxWallet.Items.Clear();
+
+            foreach (var item in _wallets)
+            {
+                comboBoxWallet.Items.Add(item);
+            }
+
+            comboBoxWallet.SelectedItem = _wallet;
         }
 
         private Network Network
         {
-            get
-            {
-                if (_selectedNetwork == 1)
-                    return Network.Main;
-                else
-                    return Network.TestNet;
-            }
-        }
-
-        private bool LocalConnection
-        {
-            get { return localToolStripMenuItem.Checked; }
-        }
-
-        private string AppDir
-        {
-            get { return Directory.GetParent(this.GetType().Assembly.Location).FullName; }
+            get { return Network.TestNet; }
         }
 
         private string AddrmanFile
         {
-            get { return Path.Combine(AppDir, string.Format("addrman{0}.dat", _selectedNetwork)); }
+            get { return Path.Combine(Common.AppDir, "addrman.dat"); }
         }
 
         private string ChainFile
         {
-            get { return Path.Combine(AppDir, string.Format("chain{0}.dat", _selectedNetwork)); }
+            get { return Path.Combine(Common.AppDir, "chain.dat"); }
         }
 
         private string TrackerFile
         {
-            get {return Path.Combine(AppDir, string.Format("tracker{0}.dat", _selectedNetwork));}
-        }
-
-        private void CheckLocalToolStripMenu(bool check)
-        {
-            if (_isClosing)
-                return;
-
-            MethodInvoker method = delegate
-            {
-                localToolStripMenuItem.Checked = check;
-            };
-
-            if (this.InvokeRequired)
-                BeginInvoke(method);
-            else
-                method.Invoke();
+            get { return Path.Combine(Common.AppDir, "tracker.dat"); }
         }
 
         private void UpdateInfoButton(ChainStatus status, string text)
@@ -140,6 +125,36 @@ namespace knoledge_spv
                 method.Invoke();
         }
 
+        private void UpdateBalanceLabel(string text)
+        {
+            if (_isClosing) return;
+
+            MethodInvoker method = delegate
+            {
+                labelBalance.Text = text;
+            };
+
+            if (labelBalance.InvokeRequired)
+                BeginInvoke(method);
+            else
+                method.Invoke();
+        }
+
+        private void UpdateFeeLabel(string text)
+        {
+            if (_isClosing) return;
+
+            MethodInvoker method = delegate
+            {
+                labelFee.Text = text;
+            };
+
+            if (labelFee.InvokeRequired)
+                BeginInvoke(method);
+            else
+                method.Invoke();
+        }
+
         private void UpdateStatusButton(string text, int count)
         {
             if (_isClosing) return;
@@ -176,24 +191,6 @@ namespace knoledge_spv
                 method.Invoke();
         }
 
-        private void EnableMenus(bool network, bool local, bool connect, bool disconnect)
-        {
-            if (_isClosing) return;
-
-            MethodInvoker method = delegate
-            {
-                comboBoxNetwork.Enabled = network;
-                localToolStripMenuItem.Enabled = local;
-                connectToolStripMenuItem.Enabled = connect;
-                disconnectToolStripMenuItem.Enabled = disconnect;
-            };
-
-            if (menuStrip.InvokeRequired)
-                BeginInvoke(method);
-            else
-                method.Invoke();
-        }
-
         private IPAddress GetLocalIP()
         {
             IPAddress address = null;
@@ -208,15 +205,25 @@ namespace knoledge_spv
             return address;
         }
 
-        private void UpdateUIAsNotConnected()
+        private async void PeriodicKick()
         {
-            CheckLocalToolStripMenu(true);
-            EnableMenus(true, false, true, false);
-
-            UpdateUI();
+            while (!_disposed)
+            {
+                await Task.Delay(TimeSpan.FromMinutes(10));
+                _group.Purge("For privacy concerns, will renew bloom filters on fresh nodes");
+            }
         }
 
-        private void UpdateUI()
+        private async void PeriodicUiUpdate()
+        {
+            while (!_disposed)
+            {
+                await Task.Delay(1000);
+                UpdateUI();
+            }
+        }
+
+        private async void UpdateUI()
         {
             if (_isClosing)
                 return;
@@ -224,71 +231,84 @@ namespace knoledge_spv
             if (_updatingUI)
                 return;
 
-            _updatingUI = true;
-
-            int nodes = 0;
-
-            if (_group != null && !CanConnect())
-                nodes = _group.ConnectedNodes.Count;
-
-            if (nodes == 1)
-                UpdateStatusButton(string.Format("Connected to {0} node on {1}", nodes, Network.ToString()), nodes);
-            else
-                UpdateStatusButton(string.Format("Connected to {0} nodes on {1}", nodes, Network.ToString()), nodes);
-
-            int height = _chain.Tip == null ? 0 : _chain.Height;
-            int localHeight = 0;
-            bool outOfDate = true;
-
-            if (_localChain != null && _localChain.Tip != null)
+            await Task.Factory.StartNew(() =>
             {
-                DateTimeOffset date = _localChain.Tip.Header.BlockTime.ToLocalTime();
-                DateTimeOffset now = DateTimeOffset.Now;
-                TimeSpan difference = now - date;
+                _updatingUI = true;
+                int nodes = 0;
 
-                outOfDate = difference.TotalMinutes > 45;
-                localHeight = _localChain.Tip == null ? 0 : _localChain.Height;
-            }
-
-            string chainStatus = string.Format("Local chain height = {0}", localHeight);
-
-            if (localHeight != 0)
-            {
-                chainStatus = string.Format("{0}{1} Latest Block Date = {2}", chainStatus, Environment.NewLine, _localChain.Tip.Header.BlockTime.ToLocalTime().ToString("R"));
-            }
-
-            if (nodes > 0)
-            {
-                if (height == 0 || height > localHeight)
+                if (!IsInternetAvailable())
                 {
-                    outOfDate = true;
-                    UpdateStatusLabel("Synchronising...");
+                    UpdateStatusLabel("No internet connnection.");
                 }
-                else if (height == localHeight)
-                {
-                    UpdateStatusLabel(string.Empty);
-                }
-            }
-            else
-            {
-                if (_connecting)
-                    UpdateStatusLabel(string.Format("Trying to connect to {0}...", Network.ToString()));
                 else
-                    UpdateStatusLabel("Not connected...");
-            }
+                {
+                    if (_group != null && !CanConnect())
+                        nodes = _group.ConnectedNodes.Count;
 
-            if (outOfDate)
-                UpdateInfoButton(ChainStatus.OutofDate, chainStatus);
-            else
-                UpdateInfoButton(ChainStatus.UptoDate, chainStatus);
+                    if (nodes == 1)
+                        UpdateStatusButton(string.Format("Connected to {0} node on {1}", nodes, Network.ToString()), nodes);
+                    else
+                        UpdateStatusButton(string.Format("Connected to {0} nodes on {1}", nodes, Network.ToString()), nodes);
+                }
 
 
-            _updatingUI = false;
-        }
+                ConcurrentChain chain = GetChain();
+                int height = chain.Tip == null ? 0 : chain.Height;
+                int localHeight = 0;
+                bool outOfDate = true;
+
+                if (chain != null && chain.Tip != null)
+                {
+                    DateTimeOffset date = chain.Tip.Header.BlockTime.ToLocalTime();
+                    DateTimeOffset now = DateTimeOffset.Now;
+                    TimeSpan difference = now - date;
+
+                    outOfDate = difference.TotalMinutes > 45;
+                    localHeight = chain.Tip == null ? 0 : chain.Height;
+                }
+
+                string chainStatus = string.Format("Local chain height = {0}", localHeight);
+
+                if (localHeight != 0)
+                {
+                    chainStatus = string.Format("{0}{1} Latest Block Date = {2}", chainStatus, Environment.NewLine, chain.Tip.Header.BlockTime.ToLocalTime().ToString("R"));
+                }
+
+                if (nodes > 0)
+                {
+                    if (height == 0 || height > localHeight)
+                    {
+                        outOfDate = true;
+                        UpdateStatusLabel("Synchronising...");
+                    }
+                }
+
+                if (outOfDate)
+                    UpdateInfoButton(ChainStatus.OutofDate, chainStatus);
+                else
+                    UpdateInfoButton(ChainStatus.UptoDate, chainStatus);
+
+                if (_wallet != null)
+                {
+                    _wallet.Update();
+
+                    if (_transactions != _wallet.Transactions.Count)
+                    {
+                        UpdateListView(_wallet.Transactions);
+                        UpdateBalanceLabel(GetBalance().ToString(false, false) + " BTC");
+                        _transactions = _wallet.Transactions.Count;
+                    }
+                }
+
+                if (_isSaving) UpdateStatusLabel("Saving...");
+
+                _updatingUI = false;
+            });
+        }        
 
         public bool CanConnect()
         {
-            if (_isClosing || _connecting)
+            if (_isClosing)
                 return false;
 
             if (_group != null && _group.ConnectedNodes.Count >= 1)
@@ -302,61 +322,6 @@ namespace knoledge_spv
             }
 
             return true;
-        }
-
-        private void SaveChainToDisk()
-        {
-            if (_isClosing)
-                return;
-
-            int locaHeight = _localChain.Tip == null ? 0 : _localChain.Height;
-            int height = _chain.Tip == null ? 0 : _chain.Height;
-
-            if (locaHeight < height)
-            {
-                using (var fs = File.Open(ChainFile, FileMode.Create))
-                {
-                    _chain.WriteTo(fs);
-                    _localChain = _chain.Clone();
-                }
-            }
-        }
-
-        private Task<ConcurrentChain> GetChain()
-        {
-            Task<ConcurrentChain> t = Task<ConcurrentChain>.Factory.StartNew(() =>
-            {
-                ConcurrentChain chain = new ConcurrentChain();
-                try
-                {
-                    lock (_padlock)
-                    {
-                        chain.Load(File.ReadAllBytes(ChainFile));
-                    }
-                }
-                catch
-                {
-                    chain = new ConcurrentChain();
-                }
-
-                return chain;
-            });
-
-            return t;
-        }
-
-        public void Connect()
-        {
-            if (_isClosing)
-                return;
-
-            EnableMenus(false, false, false, true);
-
-            _cts = new CancellationTokenSource();
-            StartConnection();
-            UpdateUI();
-
-            _wallet = new KnoledgeWallet(Network);
         }
 
         private Tracker GetTracker()
@@ -387,12 +352,24 @@ namespace knoledge_spv
             return new Tracker();
         }
 
-        private ChainBehavior GetChainBehaviour()
+        private ConcurrentChain GetChain()
         {
             if (_connectionParameters != null)
-                return _connectionParameters.TemplateBehaviors.Find<ChainBehavior>();
-
-            return new ChainBehavior(_chain);
+            {
+                return _connectionParameters.TemplateBehaviors.Find<ChainBehavior>().Chain;
+            }
+            var chain = new ConcurrentChain(Network);
+            try
+            {
+                lock (_padlock)
+                {
+                    chain.Load(File.ReadAllBytes(ChainFile));
+                }
+            }
+            catch
+            {
+            }
+            return chain;
         }
 
         private AddressManager GetAddressManager()
@@ -418,85 +395,32 @@ namespace knoledge_spv
             }
         }
 
-        public async void StartConnection()
+        public async void StartConnecting()
         {
-            if (_cts.IsCancellationRequested)
-                return;
-
-            if (_connecting)
-                return;
-
             await Task.Factory.StartNew(() =>
             {
-                if (Monitor.TryEnter(_padlock))
+                var parameters = new NodeConnectionParameters();
+                parameters.TemplateBehaviors.Add(new AddressManagerBehavior(GetAddressManager())); //So we find nodes faster
+                parameters.TemplateBehaviors.Add(new ChainBehavior(GetChain())); //So we don't have to load the chain each time we start
+                parameters.TemplateBehaviors.Add(new TrackerBehavior(GetTracker())); //Tracker knows which scriptPubKey and outpoints to track, it monitors all your wallets at the same
+                
+                if (!_disposed)
                 {
-                    try
+                    _group = new NodesGroup(Network, parameters, new NodeRequirement()
                     {
-                        _connecting = true;
-
-                        var parameters = new NodeConnectionParameters();
-                        ChainBehavior chainBehave = GetChainBehaviour();
-                        parameters.TemplateBehaviors.Add(chainBehave);
-
-                        if (LocalConnection)
-                        {
-                            _group = GetNodesGroup(parameters);
-                            _node = Node.ConnectToLocal(Network, ProtocolVersion.PROTOCOL_VERSION, true, _cts.Token);
-
-                            if (_chain.Tip != null && _node.Behaviors.Find<ChainBehavior>() != null)
-                                _node.Behaviors.Add(chainBehave);
-
-
-                            _group.ConnectedNodes.Add(_node);
-                            _connectionParameters = _group.NodeConnectionParameters;
-                        }
-                        else
-                        {
-                            if (parameters.TemplateBehaviors.Find<AddressManagerBehavior>() == null)
-                            {
-                                AddressManagerBehavior addMan = new AddressManagerBehavior(GetAddressManager());
-                                parameters.TemplateBehaviors.Add(addMan);
-                            }
-
-                            if (parameters.TemplateBehaviors.Find<TrackerBehavior>() == null)
-                            {
-                                TrackerBehavior tracker = new TrackerBehavior(GetTracker());
-                                parameters.TemplateBehaviors.Add(tracker);
-                            }
-
-                            _group = GetNodesGroup(parameters);
-                            _group.Connect();
-                            _connectionParameters = _group.NodeConnectionParameters;
-                        }
-                    }
-                    catch
-                    {
-                        EnableMenus(true, true, true, false);
-
-                        if (_localIPAddress == null)
-                            UpdateUIAsNotConnected();
-                    }
-                    finally
-                    {
-                        _connecting = false;
-                        Monitor.Exit(_padlock);
-                    }
+                        RequiredServices = NodeServices.Network //Needed for SPV
+                    });
+                    _group.Connect();
+                    _connectionParameters = _group.NodeConnectionParameters;
                 }
-            }, _cts.Token);
-        }
-
-        private KnoledgeNodesGroup GetNodesGroup(NodeConnectionParameters parameters)
-        {
-            KnoledgeNodesGroup group = new KnoledgeNodesGroup(Network, parameters, new NodeRequirement()
-            {
-                RequiredServices = NodeServices.Network
             });
 
-            group.StateChanged = Node_StateChanged;
-            group.MessageReceived = Node_MessageReceived;
-            group.Disconnected = Node_Disconnected;
+            PeriodicSave();
+            PeriodicUiUpdate();
+            PeriodicKick();
 
-            return group;
+            foreach (var wallet in _wallets)
+                wallet.Wallet.Connect(_connectionParameters);
         }
 
         private bool IsInternetAvailable()
@@ -505,107 +429,41 @@ namespace knoledge_spv
             return NativeCalls.InternetGetConnectedState(out description, 0);
         }
 
-        private void Disconnect(string reason)
+        private async void PeriodicSave()
         {
-            EnableMenus(true, true, true, false);
-            _cts.Cancel(false);
-
-            if (_group != null)
-                _group.Disconnect(reason);
-
-            if (_node != null && _node.IsConnected)
-                _node.Disconnect(reason);
-
-            UpdateUI();
-        }
-
-        private void Node_MessageReceived(Node node, IncomingMessage message)
-        {
-        }
-
-        private void Node_Disconnected(Node node)
-        {
-
-        }
-
-        private void Node_StateChanged(Node node, NodeState oldState)
-        {
-            if (node.State == NodeState.Connected)
+            while (!_disposed)
             {
-                node.VersionHandshake();
+                await Task.Delay(100000);
+                SaveAsync();
             }
-            else if (node.State == NodeState.HandShaked)
-            {
-                if (_chain.Tip == null || node.PeerVersion.StartHeight < _localChain.Height)
-                {
-                    GetChainFromNode(node);
-                    SaveChainToDisk();
-                }
-            }
-
-            UpdateUI();
         }
 
-        private async void GetChainFromNode(Node node)
+        private void SaveAsync()
         {
-            if (_gettingChain)
-                return;
+            if (_isClosing)
+                return; 
 
-            await Task.Factory.StartNew(() =>
+            var wallets = _wallets.ToArray();
+            var unused = Task.Factory.StartNew(() =>
             {
-                if (Monitor.TryEnter(_padlock))
+                lock (_padlock)
                 {
-                    _gettingChain = true;
+                    _isSaving = true;
 
-                    try
+                    GetAddressManager().SavePeerFile(AddrmanFile, Network);
+                    using (var fs = File.Open(ChainFile, FileMode.Create))
                     {
-                        _chain = node.GetChain(null, _cts.Token);
+                        GetChain().WriteTo(fs);
                     }
-                    catch { }
-                    finally
+                    using (var fs = File.Open(TrackerFile, FileMode.Create))
                     {
-                        _gettingChain = false;
-                        Monitor.Exit(_padlock);
+                        GetTracker().Save(fs);
                     }
-                }
-            });
-        }
 
-        public async void Save()
-        {
-            if (_saving)
-                return;
+                    foreach (var wallet in wallets)
+                        wallet.Save();
 
-            await Task.Factory.StartNew(() =>
-            {
-                if (Monitor.TryEnter(_padlock))
-                {
-                    try
-                    {
-                        _saving = true;
-                        AddressManager addr = GetAddressManager();
-
-                        if (addr != null)
-                            addr.SavePeerFile(AddrmanFile, Network);
-
-                        SaveChainToDisk();
-
-                        using (var fs = File.Open(TrackerFile, FileMode.Create))
-                        {
-                            Tracker tracker = GetTracker();
-                            
-                            if (tracker != null)
-                                tracker.Save(fs);
-                        }
-
-                        _wallet.Save();
-                    }
-                    catch { }
-                    finally
-                    {
-                        _saving = false;
-                        Monitor.Exit(_padlock);
-                    }
+                    _isSaving = false;
                 }
             });
         }
@@ -615,72 +473,25 @@ namespace knoledge_spv
             Close();
         }
 
-        private void connectToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            Connect();
-        }
-
-        private void disconnectToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            Disconnect("Requested by user.");
-        }
-
         private void FormMain_FormClosing(object sender, FormClosingEventArgs e)
         {
+            if (_isSaving)
+            {
+                MessageBox.Show(this, "Save in progress, try closing again in a moment...", "Warning" ,MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                e.Cancel = true;
+                return;
+            }
+
             _isClosing = true;
-            Disconnect("Application closing");
         }
 
         private void FormMain_Load(object sender, EventArgs e)
         {
-            NetworkChange.NetworkAddressChanged += NetworkChange_NetworkAddressChanged;
         }
 
-        private void Timer_Tick(object sender, EventArgs e)
+        private void FormMain_Shown(object sender, EventArgs e)
         {
-            if (_isClosing)
-                return;
-
-            UpdateUI();
-            Save();
-        }
-
-        private void NetworkChange_NetworkAddressChanged(object sender, EventArgs e)
-        {
-            if (IsInternetAvailable())
-                _localIPAddress = GetLocalIP();
-            else
-                _localIPAddress = null;
-
-            if (_localIPAddress == null)
-            {
-                Disconnect("No internet connection.");
-                UpdateUIAsNotConnected();
-            }
-            else
-            {
-                EnableMenus(true, true, true, false);
-            }
-
-            _oldIPAddress = _localIPAddress;
-        }
-
-        private async void FormMain_Shown(object sender, EventArgs e)
-        {
-            _chain = await GetChain();
-            _localChain = _chain.Clone();
-
-            _timer.Interval = 5000;
-            _timer.Tick += Timer_Tick;
-            _timer.Start();
-
-            NetworkChange_NetworkAddressChanged(this, new EventArgs());
-        }
-
-        private void comboBoxNetwork_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            if (_initialised)
-                _selectedNetwork = comboBoxNetwork.SelectedIndex;
+            StartConnecting();
         }
 
         private void buttonStatus_Click(object sender, EventArgs e)
@@ -705,19 +516,10 @@ namespace knoledge_spv
                 if (components != null)
                     components.Dispose();
 
-                NetworkChange.NetworkAddressChanged -= NetworkChange_NetworkAddressChanged;
-                _cts.Cancel();
-
                 if (_group != null)
                 {
                     _group.Disconnect();
                     _group.Dispose();
-                }
-
-                if (_node != null && _node.IsConnected)
-                {
-                    _node.Disconnect();
-                    _node.Dispose();
                 }
             }
 
@@ -727,5 +529,362 @@ namespace knoledge_spv
         }
 
         #endregion
+
+        private void addWalletToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            KnoledgeWallet wallet = new KnoledgeWallet(Network);
+            wallet.Name = "Wallet" + _wallets.Count;
+
+            using (FormWallet form = new FormWallet(Network, wallet))
+            {
+                if (form.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    if (wallet.IsValid)
+                    {
+                        using (new HourGlass())
+                        {
+                            UpdateStatusLabel("Creating a new wallet, please wait...");
+                            CreateWallet(wallet);
+                            UpdateWalletComboBox();
+                        }
+                    }
+                }
+            }
+        }
+
+        internal void CreateWallet(KnoledgeWallet knoledgeWallet)
+        {
+            WalletCreation creation = knoledgeWallet.CreateWalletCreation();
+            Wallet wallet = new Wallet(creation);
+            knoledgeWallet.Set(wallet);
+
+            _wallets.Add(knoledgeWallet);
+
+            if (_wallet == null)
+                _wallet = knoledgeWallet;
+
+            knoledgeWallet.Save();
+
+            if (_connectionParameters != null)
+                wallet.Connect(_connectionParameters);
+        }
+
+        private void comboBoxWallet_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (comboBoxWallet.SelectedItem != null)
+            {
+                _wallet = (KnoledgeWallet)comboBoxWallet.SelectedItem;
+                _wallet.Update();
+
+                UpdateAddressComboBox();
+
+                comboBoxAddress.Text = "";
+                comboBoxAddress.SelectedItem = _wallet.CurrentAddress;
+
+                UpdateListView(_wallet.Transactions);
+            }
+        }
+
+                private void comboBoxAddress_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            _wallet.CurrentAddress = (BitcoinAddress)comboBoxAddress.SelectedItem;
+        }
+
+        private void UpdateListView(List<KnoledgeTransaction> list)
+        {
+            MethodInvoker method = delegate
+            {
+                if (listView.Items.Count > 0) listView.Items.Clear();
+
+                foreach (KnoledgeTransaction item in list)
+                {
+                    string[] subItems = { item.TransactionId, item.BlockId, item.Confirmations };
+
+                    ListViewItem lvi = new ListViewItem();
+                    lvi.Text = item.Balance;
+                    lvi.Tag = item;
+                    lvi.SubItems.AddRange(subItems);
+
+                    listView.Items.Add(lvi);
+                }
+            };
+
+            if (listView.InvokeRequired)
+                BeginInvoke(method);
+            else
+                method.Invoke();
+        }
+
+        private void createNewAddressToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (_wallet != null && (_wallet.Wallet.State != WalletState.Created))
+            {
+                using (new HourGlass())
+                {
+                    UpdateStatusLabel("Creating a new address, please wait...");
+                    _wallet.Wallet.GetNextScriptPubKey();
+                    comboBoxWallet_SelectedIndexChanged(this, new EventArgs());
+                }
+            }
+        }
+
+        private void UpdateAddressComboBox()
+        {
+            if (comboBoxAddress.Items.Count > 0) comboBoxAddress.Items.Clear();
+
+            foreach (var item in _wallet.Addresses)
+            {
+                comboBoxAddress.Items.Add(item);
+            }
+        }
+
+        private void copyAddressToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (comboBoxAddress.SelectedItem != null)
+            {
+                Clipboard.SetText(comboBoxAddress.SelectedItem.ToString());
+            }
+        }
+
+        private void copyAmountToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            MessageBox.Show("Copy amount...");
+        }
+
+        private void copyTransactionIdToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            MessageBox.Show("Copy Tx Id...");
+        }
+
+        private void showDetailsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            MessageBox.Show("Show Details...");
+        }
+
+        private void buttonPastePayTo_Click(object sender, EventArgs e)
+        {
+            if (Clipboard.ContainsText())
+                textBoxPayTo.Text = (string)Clipboard.GetData(DataFormats.Text);
+        }
+
+        private void buttonClear_Click(object sender, EventArgs e)
+        {
+            textBoxPayTo.Text = string.Empty;
+            textBoxLabel.Text = string.Empty;
+            numericUpDownAmount.Value = 0;
+        }
+
+        private void buttonSend_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(textBoxPayTo.Text)) return;
+            if (numericUpDownAmount.Value == 0) return;
+
+            try
+            {
+                var payToaddress = new BitcoinAddress(textBoxPayTo.Text);
+                var amount = Money.Coins(numericUpDownAmount.Value);
+                var coins = GetCoinSource();
+
+                if (coins == null)
+                {
+                    MessageBox.Show(this, "Could not find any unspent coins in the selected Wallet", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                var txBuilder = CreateTransactionBuilder(payToaddress, amount, coins);
+                var transaction = txBuilder.BuildTransaction(false);
+
+                AddMessageToTransaction(textBoxLabel.Text, transaction);
+
+                var estimatedFees = CalcFees(txBuilder, transaction);
+
+                txBuilder.SendEstimatedFees(estimatedFees);
+
+                var signed = txBuilder.BuildTransaction(true);
+
+                if (txBuilder.Verify(signed, estimatedFees))
+                {
+                    using (FormConfirm frm = new FormConfirm())
+                    {
+                        frm.Address = _wallet.CurrentAddress.ToString();
+                        frm.Amount = string.Format("{0} BTC", amount.ToUnit(MoneyUnit.BTC));
+                        frm.Fee = string.Format("{0} BTC", estimatedFees.ToUnit(MoneyUnit.BTC));
+                        frm.Total = string.Format("Total amount {0} BTC", (amount + estimatedFees).ToUnit(MoneyUnit.BTC));
+
+                        if (frm.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                        {
+                            if (_group != null && _group.ConnectedNodes.Any())
+                            {
+                                var node = _group.ConnectedNodes.First();
+                                // say hello
+                                node.VersionHandshake();
+                                // advertise the transaction, just send the hash
+                                node.SendMessage(new InvPayload(NBitcoin.Protocol.InventoryType.MSG_TX, signed.GetHash()));
+                                //send the transaction
+                                node.SendMessage(new TxPayload(signed));
+                                //wait for a bit
+                                Thread.Sleep(500);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    MessageBox.Show(this, "The Transaction could not be Verified for the selected Wallet.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (FormatException)
+            {
+                MessageBox.Show(this, "The [Pay To] address has an invalid format.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (NBitcoin.NotEnoughFundsException ex)
+            {
+                MessageBox.Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private Money GetBalance()
+        {
+            WalletTransactionsCollection transactions = null;
+            try
+            {
+                transactions = _wallet.Wallet.GetTransactions();
+            }
+            catch { }
+
+
+            if (transactions == null || transactions.Count == 0)
+                return Money.Zero;
+            else
+                return transactions.Summary.Spendable.Amount;
+        }
+
+        private ICoin[] GetCoinSource()
+        {
+            WalletTransactionsCollection transactions = null;
+            try
+            {
+                transactions = _wallet.Wallet.GetTransactions();
+            }
+            catch { }
+
+
+            if (transactions == null || transactions.Count == 0)
+                return null;
+            else
+                return transactions.GetSpendableCoins().ToArray();
+        }
+
+        private void buttonVerify_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(textBoxPayTo.Text)) return;            
+            if (numericUpDownAmount.Value == 0) return;
+
+            try
+            {                
+                var payToaddress = new BitcoinAddress(textBoxPayTo.Text);
+                var amount = Money.Coins(numericUpDownAmount.Value);
+                var coins = GetCoinSource();
+
+                if (coins == null)
+                {
+                    MessageBox.Show(this, "Could not find any unspent coins in the selected Wallet", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return; 
+                }
+
+                var txBuilder = CreateTransactionBuilder(payToaddress, amount, coins);
+                var transaction = txBuilder.BuildTransaction(false);
+
+                AddMessageToTransaction(textBoxLabel.Text, transaction);
+
+                var estimatedFees = CalcFees(txBuilder, transaction);
+
+                txBuilder.SendEstimatedFees(estimatedFees);
+                
+                var signed = txBuilder.BuildTransaction(true);
+
+                if (txBuilder.Verify(signed, estimatedFees))
+                {
+                    MessageBox.Show(signed.ToString());
+                }
+                else
+                {
+                    MessageBox.Show(this, "The Transaction could not be Verified for the selected Wallet.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            catch (FormatException)
+            {
+                MessageBox.Show(this, "The [Pay To] address has an invalid format.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (NBitcoin.NotEnoughFundsException ex)
+            {
+                MessageBox.Show(this, ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private Money CalcFees(TransactionBuilder txBuilder, Transaction transaction)
+        {
+            var estimatedFees = txBuilder.EstimateFees(transaction);
+            UpdateFeeLabel(estimatedFees.ToUnit(MoneyUnit.BTC) + " BTC/kb");
+            return estimatedFees;
+        }
+
+        private static void AddMessageToTransaction(string message, Transaction transaction)
+        {
+            //add a message if required
+            if (!string.IsNullOrEmpty(message))
+            {
+                var bytes = Encoding.UTF8.GetBytes(message);
+                transaction.AddOutput(new TxOut() { Value = Money.Zero, ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(bytes) });
+            }
+        }
+
+        private Transaction CreateSignedTransaction(TransactionBuilder txBuilder, BitcoinAddress address, Money amount, ICoin[] coins, out Money estimatedFees, string message = "")
+        {
+            // Get the Key for the Coins we are going to spend
+            ExtKey masterKey = _wallet.PrivateKeys[0];
+            KeyPath keyPath = _wallet.Wallet.GetKeyPath(coins[0].TxOut.ScriptPubKey);
+            ExtKey key = masterKey.Derive(keyPath);
+
+
+            var transaction = txBuilder
+                .AddCoins(coins)
+                .AddKeys(key)
+                .Send(address.ScriptPubKey, amount)
+                .SetChange(_wallet.CurrentAddress.ScriptPubKey)
+                .BuildTransaction(false);
+
+            //add a message if required
+            if (!string.IsNullOrEmpty(message))
+            {
+                var bytes = Encoding.UTF8.GetBytes(textBoxLabel.Text);
+                transaction.AddOutput(new TxOut() { Value = Money.Zero, ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(bytes) });
+            }
+
+            //Add a fee and sign the transaction
+            estimatedFees = txBuilder.EstimateFees(transaction);
+            txBuilder.SendEstimatedFees(estimatedFees);
+            Transaction signed  = txBuilder.BuildTransaction(true);
+
+            return signed;
+        }
+
+        private TransactionBuilder CreateTransactionBuilder(BitcoinAddress address, Money amount, ICoin[] coins)
+        {
+            TransactionBuilder txBuilder = new TransactionBuilder();
+            // Get the Key for the Coins we are going to spend
+            ExtKey masterKey = _wallet.PrivateKeys[0];
+            KeyPath keyPath = _wallet.Wallet.GetKeyPath(coins[0].TxOut.ScriptPubKey);
+            ExtKey key = masterKey.Derive(keyPath);
+
+
+            var transaction = txBuilder
+                .AddCoins(coins)
+                .AddKeys(key)
+                .Send(address.ScriptPubKey, amount)
+                .SetChange(_wallet.CurrentAddress.ScriptPubKey);
+
+            return txBuilder;
+        }
     }
 }

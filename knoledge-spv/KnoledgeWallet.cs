@@ -14,100 +14,161 @@ namespace knoledge_spv
         const string WALLET_NAME = "Wallet";
         Network _network;
 
-        public KnoledgeWallet( Network network)
+        public KnoledgeWallet(Network network)
         {
             _network = network;
+            SigRequired = 1;
+            Keys.Add(new WalletKey(_network, this));
+        }
 
-            PrivateKeys = new [] { new ExtKey().GetWif(network) };
-            PubKeys = new [] { PrivateKeys[0].ExtKey.Neuter().GetWif(network) };
+        public string Name { get; set; }
+        public int SigRequired { get; set; }
 
-            WalletCreation creation = new WalletCreation()
+        public bool IsP2SH { get; set; }
+
+        public BitcoinAddress CurrentAddress { get; set; }
+
+        public IList<BitcoinAddress> Addresses { get; set; }
+
+        IList<WalletKey> _keys = new List<WalletKey>();
+        public IList<WalletKey> Keys
+        {
+            get
             {
-                SignatureRequired = 1,
-                UseP2SH = false,
-                Network = network,
-
-                RootKeys = PubKeys.Where(k => k != null).Select(k => k.ExtPubKey).ToArray()
-            };
-
-            Wallet = new NBitcoin.SPV.Wallet(creation);
-            Load();
-        }
-
-        public Wallet Wallet { get; set; }
-
-        private string AppDir
-        {
-            get { return Directory.GetParent(this.GetType().Assembly.Location).FullName; }
-        }
-
-        public string WalletDir
-        {
-            get { return Path.Combine(AppDir, WALLET_NAME); }
-        }
-
-        public BitcoinAddress CurrentAddress {get;set;}
-
-
-        public void Save()
-        {
-            if (!Directory.Exists(WalletDir))
-                Directory.CreateDirectory(WalletDir);
-
-            using (var fs = File.Open(WalletFile(), FileMode.Create))
-            {
-                Wallet.Save(fs);
+                return _keys;
             }
-
-            File.WriteAllText(PrivateKeyFile(), string.Join(",", PrivateKeys.AsEnumerable()));
         }
 
-        private string WalletFile()
+        private string WalletDir
         {
-            return Path.Combine(WalletDir, "Wallet.dat");
-        }
-
-        private string PrivateKeyFile()
-        {
-            return Path.Combine(WalletDir, "PrivateKeys");
-        }
-
-        public BitcoinExtKey[] PrivateKeys {get;set;}
-        public BitcoinExtPubKey[] PubKeys { get; set; }
-
-
-        private void Load()
-        {
-            try
+            get
             {
-                BitcoinExtKey[] privateKeys =
-                    File.ReadAllText(PrivateKeyFile())
-                    .Split(',')
-                    .Select(c => new BitcoinExtKey(c, _network))
-                    .ToArray();
+                return Path.Combine(Common.AppDir, Name);
+            }
+        }
+        
+        internal string WalletFile
+        {
+            get { return Path.Combine(WalletDir, "Wallet.Dat"); }
+        }
 
-                using (var fs = File.Open(WalletFile(), FileMode.Open))
+        internal string PrivateKeyFile
+        {
+            get { return Path.Combine(WalletDir, "PrivateKeys"); }
+        }
+
+        internal Wallet _wallet;
+        public Wallet Wallet
+        {
+            get
+            {
+                return _wallet;
+            }
+        }
+
+        private List<KnoledgeTransaction> _Transactions = new List<KnoledgeTransaction>();
+        public List<KnoledgeTransaction> Transactions
+        {
+            get
+            {
+                return _Transactions;
+            }
+            set
+            {
+                if (value != _Transactions)
                 {
-                    Wallet = Wallet.Load(fs);
+                    _Transactions = value;
                 }
             }
-            catch (IOException)
-            {
-            }
         }
 
-        public void Update()
+        public BitcoinExtKey[] PrivateKeys
         {
-            if (Wallet != null)
+            get;
+            set;
+        }
+
+        //Always have one Key even if it is null.
+        internal void Update()
+        {
+            foreach (var key in _keys.Reverse().ToList())
             {
-                CurrentAddress = Wallet
+                if (key.PubKey == null && _keys.Count > 1)
+                    _keys.Remove(key);
+            }
+
+            if (_wallet != null)
+            {
+                CurrentAddress = _wallet
                                     .GetKnownScripts(true)
                                     .Where(s => s.Value.Indexes[0] == 0) //On public branch
                                     .OrderByDescending(s => s.Value.Indexes[1]) //We generate HD on the path : 0/N, the highest is the latest scriptPubKey
                                     .Select(s => s.Key.GetDestinationAddress(_network))
                                     .FirstOrDefault();
 
+                Addresses = _wallet
+                                .GetKnownScripts(true)
+                                .Where(s => s.Value.Indexes[0] == 0)
+                                .OrderByDescending(s => s.Value.Indexes[1])
+                                .Select(s => s.Key.GetDestinationAddress(_network))
+                                .ToList();
+
+                if (_wallet.State != WalletState.Created)
+                    Transactions = _wallet.GetTransactions().Select(t => new KnoledgeTransaction(t)).ToList();
             }
+        }
+
+        internal NBitcoin.SPV.WalletCreation CreateWalletCreation()
+        {
+            return new NBitcoin.SPV.WalletCreation()
+            {
+                SignatureRequired = SigRequired,
+                UseP2SH = IsP2SH,
+                Network = _network,
+                RootKeys = _keys.Where(k => k.PubKey != null).Select(k => k.PubKey.ExtPubKey).ToArray()
+            };
+        }
+
+        public bool IsValid
+        {
+            get
+            {
+                return RealKeys.Count() != 0 &&
+                    SigRequired <= RealKeys.Count() &&
+                    SigRequired >= 1;
+            }
+        }
+
+        public IEnumerable<WalletKey> RealKeys
+        {
+            get
+            {
+                return _keys.Where(k => k.PubKey != null);
+            }
+        }
+
+        internal void Set(NBitcoin.SPV.Wallet wallet)
+        {
+            _wallet = wallet;
+            PrivateKeys = Keys.Where(k => k.PrivateKey != null).Select(k => k.PrivateKey).ToArray();
+        }
+
+        internal void Save()
+        {
+            if (!Directory.Exists(WalletDir))
+                Directory.CreateDirectory(WalletDir);
+
+            using (var fs = File.Open(WalletFile, FileMode.Create))
+            {
+                Wallet.Save(fs);
+            }
+
+            File.WriteAllText(PrivateKeyFile, string.Join(",", PrivateKeys.AsEnumerable()));
+        }
+
+        public override string ToString()
+        {
+            return Name;
         }
     }
 }
