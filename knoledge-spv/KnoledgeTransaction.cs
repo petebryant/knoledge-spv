@@ -24,9 +24,19 @@ namespace knoledge_spv
         {
             get { return _transaction.Transaction.GetHash().ToString(); }
         }
-        public string Balance
+        public decimal Balance
         {
-            get { return _transaction.Balance.ToUnit(MoneyUnit.BTC).ToString(); }
+            get { return _transaction.Balance.ToUnit(MoneyUnit.BTC); }
+        }
+
+        public string GetBalanceString()
+        {
+            return _transaction.Balance.ToUnit(MoneyUnit.BTC).ToString() + " BTC";
+        }
+
+        public string Date
+        {
+            get { return _transaction.AddedDate.ToString("dd/MM/yyyy hh:mm:ss"); }
         }
 
         public string BlockId

@@ -46,9 +46,6 @@
             this.columnHeaderBlockId = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.columnHeaderConfirms = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.contextMenuStripTx = new System.Windows.Forms.ContextMenuStrip(this.components);
-            this.copyAmountToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.copyTransactionIdToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.toolStripSeparator3 = new System.Windows.Forms.ToolStripSeparator();
             this.showDetailsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.tabPageSend = new System.Windows.Forms.TabPage();
             this.groupBoxFee = new System.Windows.Forms.GroupBox();
@@ -101,7 +98,7 @@
             // exitToolStripMenuItem
             // 
             this.exitToolStripMenuItem.Name = "exitToolStripMenuItem";
-            this.exitToolStripMenuItem.Size = new System.Drawing.Size(211, 30);
+            this.exitToolStripMenuItem.Size = new System.Drawing.Size(124, 30);
             this.exitToolStripMenuItem.Text = "E&xit";
             this.exitToolStripMenuItem.Click += new System.EventHandler(this.exitToolStripMenuItem_Click);
             // 
@@ -307,6 +304,7 @@
             this.columnHeaderConfirms});
             this.listView.ContextMenuStrip = this.contextMenuStripTx;
             this.listView.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.listView.FullRowSelect = true;
             this.listView.Location = new System.Drawing.Point(3, 3);
             this.listView.MultiSelect = false;
             this.listView.Name = "listView";
@@ -339,36 +337,14 @@
             // 
             this.contextMenuStripTx.ImageScalingSize = new System.Drawing.Size(24, 24);
             this.contextMenuStripTx.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.copyAmountToolStripMenuItem,
-            this.copyTransactionIdToolStripMenuItem,
-            this.toolStripSeparator3,
             this.showDetailsToolStripMenuItem});
             this.contextMenuStripTx.Name = "contextMenuStripTx";
-            this.contextMenuStripTx.Size = new System.Drawing.Size(254, 100);
-            // 
-            // copyAmountToolStripMenuItem
-            // 
-            this.copyAmountToolStripMenuItem.Name = "copyAmountToolStripMenuItem";
-            this.copyAmountToolStripMenuItem.Size = new System.Drawing.Size(253, 30);
-            this.copyAmountToolStripMenuItem.Text = "Copy Amount";
-            this.copyAmountToolStripMenuItem.Click += new System.EventHandler(this.copyAmountToolStripMenuItem_Click);
-            // 
-            // copyTransactionIdToolStripMenuItem
-            // 
-            this.copyTransactionIdToolStripMenuItem.Name = "copyTransactionIdToolStripMenuItem";
-            this.copyTransactionIdToolStripMenuItem.Size = new System.Drawing.Size(253, 30);
-            this.copyTransactionIdToolStripMenuItem.Text = "Copy Transaction Id";
-            this.copyTransactionIdToolStripMenuItem.Click += new System.EventHandler(this.copyTransactionIdToolStripMenuItem_Click);
-            // 
-            // toolStripSeparator3
-            // 
-            this.toolStripSeparator3.Name = "toolStripSeparator3";
-            this.toolStripSeparator3.Size = new System.Drawing.Size(250, 6);
+            this.contextMenuStripTx.Size = new System.Drawing.Size(200, 34);
             // 
             // showDetailsToolStripMenuItem
             // 
             this.showDetailsToolStripMenuItem.Name = "showDetailsToolStripMenuItem";
-            this.showDetailsToolStripMenuItem.Size = new System.Drawing.Size(253, 30);
+            this.showDetailsToolStripMenuItem.Size = new System.Drawing.Size(211, 30);
             this.showDetailsToolStripMenuItem.Text = "Show Details";
             this.showDetailsToolStripMenuItem.Click += new System.EventHandler(this.showDetailsToolStripMenuItem_Click);
             // 
@@ -592,9 +568,6 @@
         private System.Windows.Forms.TabPage tabPageSend;
         private System.Windows.Forms.TabPage tabPageTx;
         private System.Windows.Forms.ContextMenuStrip contextMenuStripTx;
-        private System.Windows.Forms.ToolStripMenuItem copyAmountToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem copyTransactionIdToolStripMenuItem;
-        private System.Windows.Forms.ToolStripSeparator toolStripSeparator3;
         private System.Windows.Forms.ToolStripMenuItem showDetailsToolStripMenuItem;
         private System.Windows.Forms.Button buttonPastePayTo;
         private System.Windows.Forms.ToolTip toolTip;

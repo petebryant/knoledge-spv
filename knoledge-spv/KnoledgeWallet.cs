@@ -1,4 +1,5 @@
 ﻿using NBitcoin;
+using NBitcoin.Protocol;
 using NBitcoin.SPV;
 using System;
 using System.Collections.Generic;
@@ -46,7 +47,7 @@ namespace knoledge_spv
                 return Path.Combine(Common.AppDir, Name);
             }
         }
-        
+
         internal string WalletFile
         {
             get { return Path.Combine(WalletDir, "Wallet.Dat"); }
@@ -64,6 +65,11 @@ namespace knoledge_spv
             {
                 return _wallet;
             }
+        }
+
+        public WalletState State
+        {
+            get { return _wallet.State; }
         }
 
         private List<KnoledgeTransaction> _Transactions = new List<KnoledgeTransaction>();
@@ -86,6 +92,30 @@ namespace knoledge_spv
         {
             get;
             set;
+        }
+
+        public Script CurrentAddressScriptPubKey
+        {
+            get { return CurrentAddress.ScriptPubKey; }
+        }
+
+
+        public bool IsValid
+        {
+            get
+            {
+                return RealKeys.Count() != 0 &&
+                    SigRequired <= RealKeys.Count() &&
+                    SigRequired >= 1;
+            }
+        }
+
+        public IEnumerable<WalletKey> RealKeys
+        {
+            get
+            {
+                return _keys.Where(k => k.PubKey != null);
+            }
         }
 
         //Always have one Key even if it is null.
@@ -129,24 +159,6 @@ namespace knoledge_spv
             };
         }
 
-        public bool IsValid
-        {
-            get
-            {
-                return RealKeys.Count() != 0 &&
-                    SigRequired <= RealKeys.Count() &&
-                    SigRequired >= 1;
-            }
-        }
-
-        public IEnumerable<WalletKey> RealKeys
-        {
-            get
-            {
-                return _keys.Where(k => k.PubKey != null);
-            }
-        }
-
         internal void Set(NBitcoin.SPV.Wallet wallet)
         {
             _wallet = wallet;
@@ -169,6 +181,81 @@ namespace knoledge_spv
         public override string ToString()
         {
             return Name;
+        }
+
+        public Script GetNextScriptPubKey()
+        {
+            if (_wallet == null)
+                return null;
+            else
+                return _wallet.GetNextScriptPubKey();
+        }
+
+        public WalletTransactionsCollection GetTransactions()
+        {
+            if (_wallet == null)
+                return null;
+            else
+                return _wallet.GetTransactions();
+        }
+
+        public decimal GetBalance(MoneyUnit unit = MoneyUnit.BTC)
+        {
+            WalletTransactionsCollection transactions = null;
+            Money amount = Money.Zero;
+
+            try
+            {
+                transactions = _wallet.GetTransactions();
+            }
+            catch { }
+
+
+            if (transactions != null && transactions.Count > 0)
+                amount = transactions.Summary.Spendable.Amount;
+
+            return amount.ToUnit(unit);
+        }
+
+        public string GetBalanceString()
+        {
+            return GetBalance(MoneyUnit.BTC).ToString() + " BTC";
+        }
+
+        public ICoin[] GetCoinSource()
+        {
+            WalletTransactionsCollection transactions = null;
+            try
+            {
+                transactions = _wallet.GetTransactions();
+            }
+            catch { }
+
+
+            if (transactions == null || transactions.Count == 0)
+                return null;
+            else
+                return transactions.GetSpendableCoins().ToArray();
+        }
+
+        public ExtKey[] GetKeysForCoins(ICoin[] coins)
+        {
+            // Get the Key for the Coins we are going to spend
+            IList<ExtKey> keys = new List<ExtKey>();
+            ExtKey masterKey = PrivateKeys[0];
+
+            foreach (ICoin coin in coins)
+            {
+                KeyPath keyPath = _wallet.GetKeyPath(coin.TxOut.ScriptPubKey);
+                keys.Add(masterKey.Derive(keyPath));
+            }
+
+            return keys.ToArray();
+        }
+
+        public void Connect(NodeConnectionParameters parameters)
+        {
+            _wallet.Connect(parameters);
         }
     }
 }

@@ -38,10 +38,12 @@ namespace knoledge_spv
 
         private void LoadWallets()
         {
-            foreach (var wallet in Common.LoadWallets(Network))
+            var wallets = Common.LoadWallets(Network);
+
+            foreach (var wallet in wallets)
             {
-                _wallets.Add(wallet);
                 wallet.Update();
+                _wallets.Add(wallet);
             }
 
             _wallet = _wallets.FirstOrDefault();
@@ -52,11 +54,7 @@ namespace knoledge_spv
         {
             if (comboBoxWallet.Items.Count > 0) comboBoxWallet.Items.Clear();
 
-            foreach (var item in _wallets)
-            {
-                comboBoxWallet.Items.Add(item);
-            }
-
+            comboBoxWallet.Items.AddRange(_wallets.ToArray());
             comboBoxWallet.SelectedItem = _wallet;
         }
 
@@ -214,6 +212,15 @@ namespace knoledge_spv
             }
         }
 
+        private async void PeriodicSave()
+        {
+            while (!_disposed)
+            {
+                await Task.Delay(100000);
+                SaveAsync();
+            }
+        }
+
         private async void PeriodicUiUpdate()
         {
             while (!_disposed)
@@ -236,9 +243,9 @@ namespace knoledge_spv
                 _updatingUI = true;
                 int nodes = 0;
 
-                if (!IsInternetAvailable())
+                if (!IsNetworkAvailable())
                 {
-                    UpdateStatusLabel("No internet connnection.");
+                    UpdateStatusLabel("No network connnection.");
                 }
                 else
                 {
@@ -292,11 +299,13 @@ namespace knoledge_spv
                 {
                     _wallet.Update();
 
-                    if (_transactions != _wallet.Transactions.Count)
+                    int txCount = _wallet.Transactions.Count;
+
+                    if (_transactions != txCount)
                     {
                         UpdateListView(_wallet.Transactions);
-                        UpdateBalanceLabel(GetBalance().ToString(false, false) + " BTC");
-                        _transactions = _wallet.Transactions.Count;
+                        UpdateBalanceLabel(_wallet.GetBalanceString());
+                        _transactions = txCount;
                     }
                 }
 
@@ -358,7 +367,9 @@ namespace knoledge_spv
             {
                 return _connectionParameters.TemplateBehaviors.Find<ChainBehavior>().Chain;
             }
+
             var chain = new ConcurrentChain(Network);
+
             try
             {
                 lock (_padlock)
@@ -382,6 +393,7 @@ namespace knoledge_spv
                     return behaviour.AddressManager;
 
             }
+
             try
             {
                 lock (_padlock)
@@ -410,6 +422,7 @@ namespace knoledge_spv
                     {
                         RequiredServices = NodeServices.Network //Needed for SPV
                     });
+
                     _group.Connect();
                     _connectionParameters = _group.NodeConnectionParameters;
                 }
@@ -420,22 +433,13 @@ namespace knoledge_spv
             PeriodicKick();
 
             foreach (var wallet in _wallets)
-                wallet.Wallet.Connect(_connectionParameters);
+                wallet.Connect(_connectionParameters);
         }
 
-        private bool IsInternetAvailable()
+        private bool IsNetworkAvailable()
         {
             int description;
             return NativeCalls.InternetGetConnectedState(out description, 0);
-        }
-
-        private async void PeriodicSave()
-        {
-            while (!_disposed)
-            {
-                await Task.Delay(100000);
-                SaveAsync();
-            }
         }
 
         private void SaveAsync()
@@ -443,7 +447,6 @@ namespace knoledge_spv
             if (_isClosing)
                 return; 
 
-            var wallets = _wallets.ToArray();
             var unused = Task.Factory.StartNew(() =>
             {
                 lock (_padlock)
@@ -451,16 +454,18 @@ namespace knoledge_spv
                     _isSaving = true;
 
                     GetAddressManager().SavePeerFile(AddrmanFile, Network);
+
                     using (var fs = File.Open(ChainFile, FileMode.Create))
                     {
                         GetChain().WriteTo(fs);
                     }
+
                     using (var fs = File.Open(TrackerFile, FileMode.Create))
                     {
                         GetTracker().Save(fs);
                     }
 
-                    foreach (var wallet in wallets)
+                    foreach (var wallet in _wallets)
                         wallet.Save();
 
                     _isSaving = false;
@@ -585,7 +590,7 @@ namespace knoledge_spv
             }
         }
 
-                private void comboBoxAddress_SelectedIndexChanged(object sender, EventArgs e)
+        private void comboBoxAddress_SelectedIndexChanged(object sender, EventArgs e)
         {
             _wallet.CurrentAddress = (BitcoinAddress)comboBoxAddress.SelectedItem;
         }
@@ -601,7 +606,7 @@ namespace knoledge_spv
                     string[] subItems = { item.TransactionId, item.BlockId, item.Confirmations };
 
                     ListViewItem lvi = new ListViewItem();
-                    lvi.Text = item.Balance;
+                    lvi.Text = item.GetBalanceString();
                     lvi.Tag = item;
                     lvi.SubItems.AddRange(subItems);
 
@@ -617,12 +622,12 @@ namespace knoledge_spv
 
         private void createNewAddressToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (_wallet != null && (_wallet.Wallet.State != WalletState.Created))
+            if (_wallet != null && (_wallet.State != WalletState.Created))
             {
                 using (new HourGlass())
                 {
                     UpdateStatusLabel("Creating a new address, please wait...");
-                    _wallet.Wallet.GetNextScriptPubKey();
+                    _wallet.GetNextScriptPubKey();
                     comboBoxWallet_SelectedIndexChanged(this, new EventArgs());
                 }
             }
@@ -632,10 +637,7 @@ namespace knoledge_spv
         {
             if (comboBoxAddress.Items.Count > 0) comboBoxAddress.Items.Clear();
 
-            foreach (var item in _wallet.Addresses)
-            {
-                comboBoxAddress.Items.Add(item);
-            }
+            comboBoxAddress.Items.AddRange(_wallet.Addresses.ToArray());
         }
 
         private void copyAddressToolStripMenuItem_Click(object sender, EventArgs e)
@@ -646,19 +648,17 @@ namespace knoledge_spv
             }
         }
 
-        private void copyAmountToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            MessageBox.Show("Copy amount...");
-        }
-
-        private void copyTransactionIdToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            MessageBox.Show("Copy Tx Id...");
-        }
-
         private void showDetailsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            MessageBox.Show("Show Details...");
+            var tx = listView.Items[1].Tag as KnoledgeTransaction;
+
+            if (tx != null)
+            {
+                using (FormTxDetails form = new FormTxDetails(tx))
+                {
+                    form.ShowDialog();
+                }
+            }
         }
 
         private void buttonPastePayTo_Click(object sender, EventArgs e)
@@ -683,7 +683,7 @@ namespace knoledge_spv
             {
                 var payToaddress = new BitcoinAddress(textBoxPayTo.Text);
                 var amount = Money.Coins(numericUpDownAmount.Value);
-                var coins = GetCoinSource();
+                var coins = _wallet.GetCoinSource();
 
                 if (coins == null)
                 {
@@ -697,10 +697,7 @@ namespace knoledge_spv
                 AddMessageToTransaction(textBoxLabel.Text, transaction);
 
                 var estimatedFees = CalcFees(txBuilder, transaction);
-
-                txBuilder.SendEstimatedFees(estimatedFees);
-
-                var signed = txBuilder.BuildTransaction(true);
+                var signed = SignTransaction(txBuilder, estimatedFees);
 
                 if (txBuilder.Verify(signed, estimatedFees))
                 {
@@ -743,36 +740,12 @@ namespace knoledge_spv
             }
         }
 
-        private Money GetBalance()
+        private static Transaction SignTransaction(TransactionBuilder txBuilder, Money estimatedFees)
         {
-            WalletTransactionsCollection transactions = null;
-            try
-            {
-                transactions = _wallet.Wallet.GetTransactions();
-            }
-            catch { }
+            txBuilder.SendEstimatedFees(estimatedFees);
 
-
-            if (transactions == null || transactions.Count == 0)
-                return Money.Zero;
-            else
-                return transactions.Summary.Spendable.Amount;
-        }
-
-        private ICoin[] GetCoinSource()
-        {
-            WalletTransactionsCollection transactions = null;
-            try
-            {
-                transactions = _wallet.Wallet.GetTransactions();
-            }
-            catch { }
-
-
-            if (transactions == null || transactions.Count == 0)
-                return null;
-            else
-                return transactions.GetSpendableCoins().ToArray();
+            var signed = txBuilder.BuildTransaction(true);
+            return signed;
         }
 
         private void buttonVerify_Click(object sender, EventArgs e)
@@ -784,7 +757,7 @@ namespace knoledge_spv
             {                
                 var payToaddress = new BitcoinAddress(textBoxPayTo.Text);
                 var amount = Money.Coins(numericUpDownAmount.Value);
-                var coins = GetCoinSource();
+                var coins = _wallet.GetCoinSource();
 
                 if (coins == null)
                 {
@@ -798,10 +771,7 @@ namespace knoledge_spv
                 AddMessageToTransaction(textBoxLabel.Text, transaction);
 
                 var estimatedFees = CalcFees(txBuilder, transaction);
-
-                txBuilder.SendEstimatedFees(estimatedFees);
-                
-                var signed = txBuilder.BuildTransaction(true);
+                var signed = SignTransaction(txBuilder, estimatedFees);
 
                 if (txBuilder.Verify(signed, estimatedFees))
                 {
@@ -824,8 +794,10 @@ namespace knoledge_spv
 
         private Money CalcFees(TransactionBuilder txBuilder, Transaction transaction)
         {
+            // the fees seem a bit high...
             var estimatedFees = txBuilder.EstimateFees(transaction);
             UpdateFeeLabel(estimatedFees.ToUnit(MoneyUnit.BTC) + " BTC/kb");
+
             return estimatedFees;
         }
 
@@ -839,50 +811,16 @@ namespace knoledge_spv
             }
         }
 
-        private Transaction CreateSignedTransaction(TransactionBuilder txBuilder, BitcoinAddress address, Money amount, ICoin[] coins, out Money estimatedFees, string message = "")
-        {
-            // Get the Key for the Coins we are going to spend
-            ExtKey masterKey = _wallet.PrivateKeys[0];
-            KeyPath keyPath = _wallet.Wallet.GetKeyPath(coins[0].TxOut.ScriptPubKey);
-            ExtKey key = masterKey.Derive(keyPath);
-
-
-            var transaction = txBuilder
-                .AddCoins(coins)
-                .AddKeys(key)
-                .Send(address.ScriptPubKey, amount)
-                .SetChange(_wallet.CurrentAddress.ScriptPubKey)
-                .BuildTransaction(false);
-
-            //add a message if required
-            if (!string.IsNullOrEmpty(message))
-            {
-                var bytes = Encoding.UTF8.GetBytes(textBoxLabel.Text);
-                transaction.AddOutput(new TxOut() { Value = Money.Zero, ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(bytes) });
-            }
-
-            //Add a fee and sign the transaction
-            estimatedFees = txBuilder.EstimateFees(transaction);
-            txBuilder.SendEstimatedFees(estimatedFees);
-            Transaction signed  = txBuilder.BuildTransaction(true);
-
-            return signed;
-        }
-
         private TransactionBuilder CreateTransactionBuilder(BitcoinAddress address, Money amount, ICoin[] coins)
         {
             TransactionBuilder txBuilder = new TransactionBuilder();
-            // Get the Key for the Coins we are going to spend
-            ExtKey masterKey = _wallet.PrivateKeys[0];
-            KeyPath keyPath = _wallet.Wallet.GetKeyPath(coins[0].TxOut.ScriptPubKey);
-            ExtKey key = masterKey.Derive(keyPath);
-
+            var keys = _wallet.GetKeysForCoins(coins);
 
             var transaction = txBuilder
                 .AddCoins(coins)
-                .AddKeys(key)
+                .AddKeys(keys)
                 .Send(address.ScriptPubKey, amount)
-                .SetChange(_wallet.CurrentAddress.ScriptPubKey);
+                .SetChange(_wallet.CurrentAddressScriptPubKey);
 
             return txBuilder;
         }

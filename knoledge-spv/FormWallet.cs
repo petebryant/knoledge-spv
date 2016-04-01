@@ -33,6 +33,7 @@ namespace knoledge_spv
 
                 listBoxPublicKeys.Items.Add(walletKey);
 
+                //have limited the Keys to just one as this is an example wallet
                 buttonGenerate.Enabled = false;
                 buttonOk.Enabled = true;
             }

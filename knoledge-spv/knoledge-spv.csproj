@@ -82,6 +82,12 @@
     <Compile Include="FormNodes.Designer.cs">
       <DependentUpon>FormNodes.cs</DependentUpon>
     </Compile>
+    <Compile Include="FormTxDetails.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="FormTxDetails.Designer.cs">
+      <DependentUpon>FormTxDetails.cs</DependentUpon>
+    </Compile>
     <Compile Include="FormWallet.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -104,6 +110,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="FormNodes.resx">
       <DependentUpon>FormNodes.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="FormTxDetails.resx">
+      <DependentUpon>FormTxDetails.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="FormWallet.resx">
       <DependentUpon>FormWallet.cs</DependentUpon>
