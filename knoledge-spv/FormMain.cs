@@ -691,11 +691,12 @@ namespace knoledge_spv
                     return;
                 }
 
-                var txBuilder = CreateTransactionBuilder(payToaddress, amount, coins);
-                AddMessageToTransaction(textBoxLabel.Text, txBuilder);
+                var txBuilder = CreateTransactionBuilder(payToaddress, amount, coins, textBoxLabel.Text);
                 var transaction = txBuilder.BuildTransaction(false);
                 var estimatedFees = CalcFees(txBuilder, transaction);
-                var signed = SignTransaction(txBuilder, estimatedFees);
+
+                txBuilder.SendFees(estimatedFees);
+                var signed = SignTransaction(txBuilder);
 
                 if (txBuilder.Verify(signed, estimatedFees))
                 {
@@ -738,10 +739,8 @@ namespace knoledge_spv
             }
         }
 
-        private static Transaction SignTransaction(TransactionBuilder txBuilder, Money estimatedFees)
+        private static Transaction SignTransaction(TransactionBuilder txBuilder)
         {
-            txBuilder.SendEstimatedFees(estimatedFees);
-
             var signed = txBuilder.BuildTransaction(true);
             return signed;
         }
@@ -763,11 +762,12 @@ namespace knoledge_spv
                     return; 
                 }
 
-                var txBuilder = CreateTransactionBuilder(payToaddress, amount, coins);
-                AddMessageToTransaction(textBoxLabel.Text, txBuilder);
+                var txBuilder = CreateTransactionBuilder(payToaddress, amount, coins, textBoxLabel.Text);
                 var transaction = txBuilder.BuildTransaction(false);
                 var estimatedFees = CalcFees(txBuilder, transaction);
-                var signed = SignTransaction(txBuilder, estimatedFees);
+
+                txBuilder.SendFees(estimatedFees);
+                var signed = SignTransaction(txBuilder);
 
                 if (txBuilder.Verify(signed, estimatedFees))
                 {
@@ -797,28 +797,35 @@ namespace knoledge_spv
             return estimatedFees;
         }
 
-        private void AddMessageToTransaction(string message, TransactionBuilder builder)
-        {
-            //add a message if required
-            if (!string.IsNullOrEmpty(message))
-            {
-                var bytes = Encoding.UTF8.GetBytes(message);
-
-                if (bytes.Length <= 40)
-                    builder.Send(TxNullDataTemplate.Instance.GenerateScriptPubKey(bytes), Money.Zero);
-            }
-        }
-
-        private TransactionBuilder CreateTransactionBuilder(BitcoinAddress address, Money amount, ICoin[] coins)
+        private TransactionBuilder CreateTransactionBuilder(BitcoinAddress address, Money amount, ICoin[] coins, string message = "")
         {
             TransactionBuilder txBuilder = new TransactionBuilder();
             var keys = _wallet.GetKeysForCoins(coins);
 
-            var transaction = txBuilder
-                .AddCoins(coins)
-                .AddKeys(keys)
-                .Send(address.ScriptPubKey, amount)
-                .SetChange(_wallet.CurrentAddressScriptPubKey);
+            if (string.IsNullOrEmpty(message))
+            {
+                txBuilder
+                    .AddCoins(coins)
+                    .AddKeys(keys)
+                    .Send(address.ScriptPubKey, amount)
+                    .SetChange(_wallet.CurrentAddressScriptPubKey);
+            }
+            else 
+            {
+                var bytes = Encoding.UTF8.GetBytes(message);
+
+                if (bytes.Length <= 40)
+                {
+                    txBuilder
+                        .AddCoins(coins)
+                        .AddKeys(keys)
+                        .Send(address.ScriptPubKey, amount)
+                        .Send(TxNullDataTemplate.Instance.GenerateScriptPubKey(bytes), Money.Zero)
+                        .SetChange(_wallet.CurrentAddressScriptPubKey);
+                }
+            }
+
+
 
             return txBuilder;
         }
