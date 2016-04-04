@@ -312,6 +312,7 @@
             this.listView.TabIndex = 2;
             this.listView.UseCompatibleStateImageBehavior = false;
             this.listView.View = System.Windows.Forms.View.Details;
+            this.listView.MouseClick += new System.Windows.Forms.MouseEventHandler(this.listView_MouseClick);
             // 
             // columnHeaderAmount
             // 
@@ -340,6 +341,7 @@
             this.showDetailsToolStripMenuItem});
             this.contextMenuStripTx.Name = "contextMenuStripTx";
             this.contextMenuStripTx.Size = new System.Drawing.Size(200, 34);
+            this.contextMenuStripTx.Opening += new System.ComponentModel.CancelEventHandler(this.contextMenuStripTx_Opening);
             // 
             // showDetailsToolStripMenuItem
             // 

@@ -824,5 +824,27 @@ namespace knoledge_spv
 
             return txBuilder;
         }
+
+        private void contextMenuStripTx_Opening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (listView.SelectedItems.Count <= 0)
+            {
+                e.Cancel = true;
+            }
+        }
+
+        private void listView_MouseClick(object sender, MouseEventArgs e)
+        {
+            ListView listView = sender as ListView;
+            if (e.Button == System.Windows.Forms.MouseButtons.Right)
+            {
+                ListViewItem item = listView.GetItemAt(e.X, e.Y);
+                if (item != null)
+                {
+                    item.Selected = true;
+                    contextMenuStripTx.Show(listView, e.Location);
+                }
+            }
+        }
     }
 }
