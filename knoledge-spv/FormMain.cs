@@ -692,10 +692,8 @@ namespace knoledge_spv
                 }
 
                 var txBuilder = CreateTransactionBuilder(payToaddress, amount, coins);
+                AddMessageToTransaction(textBoxLabel.Text, txBuilder);
                 var transaction = txBuilder.BuildTransaction(false);
-
-                AddMessageToTransaction(textBoxLabel.Text, transaction);
-
                 var estimatedFees = CalcFees(txBuilder, transaction);
                 var signed = SignTransaction(txBuilder, estimatedFees);
 
@@ -766,10 +764,8 @@ namespace knoledge_spv
                 }
 
                 var txBuilder = CreateTransactionBuilder(payToaddress, amount, coins);
+                AddMessageToTransaction(textBoxLabel.Text, txBuilder);
                 var transaction = txBuilder.BuildTransaction(false);
-
-                AddMessageToTransaction(textBoxLabel.Text, transaction);
-
                 var estimatedFees = CalcFees(txBuilder, transaction);
                 var signed = SignTransaction(txBuilder, estimatedFees);
 
@@ -801,13 +797,15 @@ namespace knoledge_spv
             return estimatedFees;
         }
 
-        private static void AddMessageToTransaction(string message, Transaction transaction)
+        private void AddMessageToTransaction(string message, TransactionBuilder builder)
         {
             //add a message if required
             if (!string.IsNullOrEmpty(message))
             {
                 var bytes = Encoding.UTF8.GetBytes(message);
-                transaction.AddOutput(new TxOut() { Value = Money.Zero, ScriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(bytes) });
+
+                if (bytes.Length <= 40)
+                    builder.Send(TxNullDataTemplate.Instance.GenerateScriptPubKey(bytes), Money.Zero);
             }
         }
 
