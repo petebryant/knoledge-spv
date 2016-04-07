@@ -650,7 +650,7 @@ namespace knoledge_spv
 
         private void showDetailsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            var tx = listView.Items[1].Tag as KnoledgeTransaction;
+            var tx = listView.SelectedItems[0].Tag as KnoledgeTransaction;
 
             if (tx != null)
             {
